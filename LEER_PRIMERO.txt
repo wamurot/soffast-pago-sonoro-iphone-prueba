@@ -1,0 +1,81 @@
+SOFFAST PAGO SONORO · IPHONE GRATIS · V1
+===========================================
+
+OBJETIVO
+--------
+Compilar gratis una IPA desde Windows usando GitHub Actions
+y luego instalarla en un iPhone con Sideloadly.
+
+NO NECESITAS:
+- Mac física
+- Apple Developer de pago
+- App Store
+- TestFlight
+
+SÍ NECESITAS:
+- Cuenta GitHub gratuita
+- Apple ID gratuito
+- Windows
+- Cable del iPhone para la primera instalación
+- Sideloadly
+
+PASO A PASO
+------------
+
+A) COMPILAR IPA GRATIS
+
+1. Crea una cuenta gratuita en GitHub si no tienes.
+2. Crea un repositorio NUEVO y PÚBLICO.
+   Importante: no subas contraseñas, tokens ni datos del VPS.
+   Este ZIP solo contiene código de prueba.
+3. Descomprime este ZIP.
+4. Sube TODO el contenido al repositorio, incluyendo:
+   .github/workflows/build-iphone.yml
+5. En GitHub abre:
+   Actions -> Compilar IPA iPhone -> Run workflow
+6. Espera a que quede verde.
+7. Abajo, en Artifacts, descarga:
+   Soffast-Pago-Sonoro-iPhone-IPA
+8. Descomprime el artifact. Obtendrás:
+   Soffast_Pago_Sonoro_iPhone_Gratis_V1.ipa
+
+B) INSTALAR EN WINDOWS
+
+1. Instala Sideloadly para Windows desde su web oficial.
+2. Conecta el iPhone por USB.
+3. Pulsa "Confiar" en el iPhone cuando lo pida.
+4. Arrastra la IPA a Sideloadly.
+5. Introduce tu Apple ID.
+6. Instala.
+7. En iPhone, si lo solicita:
+   Ajustes -> General -> VPN y gestión de dispositivos -> confiar.
+8. En iOS 16+:
+   Ajustes -> Privacidad y seguridad -> Modo desarrollador -> activar.
+
+C) PRUEBA
+
+1. Abre "Soffast Pago Sonoro".
+2. Permite notificaciones.
+3. Pulsa "Escuchar voz ahora".
+4. Debe decir:
+   "Pago recibido de Walter, diez soles."
+5. Pulsa "Probar con iPhone bloqueado".
+6. Bloquea el iPhone antes de 10 segundos.
+7. Comprobar si el sonido de la notificación reproduce la frase completa.
+
+LIMITACIONES DE ESTA INSTALACIÓN GRATUITA
+-----------------------------------------
+Apple limita la firma gratuita:
+- 7 días de validez por instalación.
+- hasta 3 apps sideloaded por dispositivo.
+- hay que renovar/reinstalar después.
+
+Esto es SOLO para validar técnicamente Soffast Pago Sonoro sin gastar dinero.
+
+SIGUIENTE FASE
+--------------
+Si la voz habla con el iPhone bloqueado:
+- conectamos el servidor Soffast;
+- recibimos nombre y monto;
+- probamos el mecanismo dinámico;
+- mantenemos la PWA actual como panel gratuito.
