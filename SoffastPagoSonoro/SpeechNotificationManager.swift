@@ -140,7 +140,6 @@ final class SpeechNotificationManager: ObservableObject {
             func finish(_ result: Result<URL, Error>) {
                 guard !completed else { return }
                 completed = true
-                self.fileSynthesizer = nil
                 continuation.resume(with: result)
             }
 
