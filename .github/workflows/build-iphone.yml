@@ -1,4 +1,4 @@
-name: Compilar IPA iPhone
+name: Compilar Soffast Pago Nativo
 
 on:
   workflow_dispatch:
@@ -11,14 +11,17 @@ jobs:
       - name: Descargar proyecto
         uses: actions/checkout@v4
 
-      - name: Mostrar Xcode
-        run: xcodebuild -version
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
 
-      - name: Compilar sin firma
+      - name: Generar proyecto
+        run: xcodegen generate
+
+      - name: Compilar
         run: |
           xcodebuild \
-            -project SoffastPagoSonoro.xcodeproj \
-            -scheme SoffastPagoSonoro \
+            -project SoffastPago.xcodeproj \
+            -scheme SoffastPago \
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
@@ -30,12 +33,12 @@ jobs:
       - name: Crear IPA
         run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/SoffastPagoSonoro.app Payload/
-          zip -qry Soffast_Pago_Sonoro_iPhone_Gratis_V1.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/SoffastPago.app Payload/
+          zip -qry Soffast_Pago_Nativo_V2_UNSIGNED.ipa Payload
 
       - name: Publicar IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Soffast-Pago-Sonoro-iPhone-IPA
-          path: Soffast_Pago_Sonoro_iPhone_Gratis_V1.ipa
+          name: Soffast-Pago-Nativo-V2
+          path: Soffast_Pago_Nativo_V2_UNSIGNED.ipa
           retention-days: 7
