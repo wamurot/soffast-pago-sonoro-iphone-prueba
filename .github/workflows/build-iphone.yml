@@ -1,4 +1,4 @@
-name: Compilar Soffast Pago Nativo
+name: Compilar Prueba Unica iPhone
 
 on:
   workflow_dispatch:
@@ -17,11 +17,11 @@ jobs:
       - name: Generar proyecto
         run: xcodegen generate
 
-      - name: Compilar
+      - name: Compilar sin firma
         run: |
           xcodebuild \
-            -project SoffastPago.xcodeproj \
-            -scheme SoffastPago \
+            -project SoffastPagoPrueba.xcodeproj \
+            -scheme SoffastPagoPrueba \
             -sdk iphoneos \
             -configuration Release \
             -derivedDataPath build \
@@ -33,12 +33,12 @@ jobs:
       - name: Crear IPA
         run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/SoffastPago.app Payload/
-          zip -qry Soffast_Pago_Nativo_V2_UNSIGNED.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/SoffastPagoPrueba.app Payload/
+          zip -qry Soffast_Pago_iPhone_PRUEBA_UNICA_UNSIGNED.ipa Payload
 
       - name: Publicar IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Soffast-Pago-Nativo-V2
-          path: Soffast_Pago_Nativo_V2_UNSIGNED.ipa
+          name: Soffast-Pago-iPhone-PRUEBA-UNICA
+          path: Soffast_Pago_iPhone_PRUEBA_UNICA_UNSIGNED.ipa
           retention-days: 7
