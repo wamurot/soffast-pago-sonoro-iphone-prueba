@@ -1,56 +1,215 @@
 import SwiftUI
-import UIKit
+import AVFoundation
 import UserNotifications
 
 struct ContentView: View {
-    @State private var status = "Pulsa Activar pagos."
-    @State private var busy = false
+    @StateObject private var manager = PagoTestManager()
 
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
-            Image(systemName: "waveform.circle.fill").font(.system(size: 82))
-            Text("Pago").font(.largeTitle.bold())
-            Text("Avisos hablados de pagos").font(.headline)
-            Text(status).multilineTextAlignment(.center).padding(.horizontal)
-            Button { activate() } label: {
-                Text(busy ? "Activando..." : "Activar pagos")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .font(.headline)
+
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.system(size: 72))
+
+            Text("Soffast Pago")
+                .font(.largeTitle.bold())
+
+            Text("Prueba única iPhone")
+                .font(.headline)
+
+            Text(manager.status)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button("Escuchar voz ahora") {
+                manager.speakNow()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(busy)
-            .padding(.horizontal, 28)
+
+            Button("Probar con iPhone bloqueado") {
+                manager.prepareLockedTest()
+            }
+            .buttonStyle(.borderedProminent)
+
+            Text("Al pulsar la segunda opción tendrás 12 segundos para bloquear el iPhone.")
+                .font(.footnote)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
             Spacer()
         }
-        .onAppear { refreshStatus() }
-        .onReceive(NotificationCenter.default.publisher(for: .soffastPushStatusChanged)) { _ in refreshStatus() }
+        .padding()
+    }
+}
+
+final class PagoTestManager: ObservableObject {
+    @Published var status = "Primero prueba la voz. Luego prueba con el iPhone bloqueado."
+
+    private let liveSynth = AVSpeechSynthesizer()
+    private var fileGenerator: SpeechFileGenerator?
+
+    func speakNow() {
+        let utterance = AVSpeechUtterance(string: "Yape, Walter, diez soles.")
+        utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
+            ?? AVSpeechSynthesisVoice(language: "es-ES")
+        utterance.rate = 0.48
+        liveSynth.speak(utterance)
+        status = "Reproduciendo: Yape, Walter, diez soles."
     }
 
-    private func activate() {
-        busy = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+    func prepareLockedTest() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
             DispatchQueue.main.async {
-                if let error { status = "Error: \(error.localizedDescription)"; busy = false; return }
-                guard granted else { status = "Debes permitir las notificaciones."; busy = false; return }
-                status = "Permiso concedido. Registrando iPhone..."
-                UIApplication.shared.registerForRemoteNotifications()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { refreshStatus(); busy = false }
+                guard let self else { return }
+
+                if let error {
+                    self.status = "Error de permisos: \(error.localizedDescription)"
+                    return
+                }
+
+                guard granted else {
+                    self.status = "Debes permitir notificaciones para hacer la prueba."
+                    return
+                }
+
+                self.status = "Generando audio..."
+                self.generateAndSchedule()
             }
         }
     }
 
-    private func refreshStatus() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let token = UserDefaults.standard.string(forKey: "soffastDeviceToken")
-            let error = UserDefaults.standard.string(forKey: "soffastPushError")
+    private func generateAndSchedule() {
+        let generator = SpeechFileGenerator()
+        self.fileGenerator = generator
+
+        generator.generate(text: "Yape, Walter, diez soles.") { [weak self] result in
             DispatchQueue.main.async {
-                if let error, !error.isEmpty { status = "Push: \(error)" }
-                else if settings.authorizationStatus == .authorized, token != nil { status = "Listo. Este iPhone ya puede recibir pagos." }
-                else if settings.authorizationStatus == .denied { status = "Notificaciones desactivadas en Ajustes." }
-                else { status = "Pulsa Activar pagos." }
+                guard let self else { return }
+
+                switch result {
+                case .failure(let error):
+                    self.status = "No se pudo generar el audio: \(error.localizedDescription)"
+                    self.fileGenerator = nil
+
+                case .success(let filename):
+                    let content = UNMutableNotificationContent()
+                    content.title = "Pago"
+                    content.body = "Yape, Walter, diez soles."
+                    content.sound = UNNotificationSound(named: UNNotificationSoundName(filename))
+
+                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 12, repeats: false)
+                    let request = UNNotificationRequest(
+                        identifier: "soffast-pago-prueba-bloqueado",
+                        content: content,
+                        trigger: trigger
+                    )
+
+                    UNUserNotificationCenter.current().add(request) { error in
+                        DispatchQueue.main.async {
+                            if let error {
+                                self.status = "No se pudo programar la prueba: \(error.localizedDescription)"
+                            } else {
+                                self.status = "LISTO: bloquea el iPhone ahora. Sonará en 12 segundos."
+                            }
+                            self.fileGenerator = nil
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+final class SpeechFileGenerator: NSObject {
+    private let synthesizer = AVSpeechSynthesizer()
+    private var audioFile: AVAudioFile?
+    private var completed = false
+    private var completion: ((Result<String, Error>) -> Void)?
+
+    func generate(text: String, completion: @escaping (Result<String, Error>) -> Void) {
+        self.completion = completion
+
+        do {
+            let soundsURL = try ensureSoundsDirectory()
+            let filename = "soffast_pago_prueba.caf"
+            let destination = soundsURL.appendingPathComponent(filename)
+
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
+                ?? AVSpeechSynthesisVoice(language: "es-ES")
+            utterance.rate = 0.48
+
+            synthesizer.write(utterance) { [weak self] buffer in
+                guard let self else { return }
+
+                guard let pcm = buffer as? AVAudioPCMBuffer else {
+                    self.finish(.failure(PagoTestError.invalidAudioBuffer))
+                    return
+                }
+
+                if pcm.frameLength == 0 {
+                    self.audioFile = nil
+                    self.finish(.success(filename))
+                    return
+                }
+
+                do {
+                    if self.audioFile == nil {
+                        self.audioFile = try AVAudioFile(
+                            forWriting: destination,
+                            settings: pcm.format.settings
+                        )
+                    }
+                    try self.audioFile?.write(from: pcm)
+                } catch {
+                    self.finish(.failure(error))
+                }
+            }
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    private func ensureSoundsDirectory() throws -> URL {
+        guard let library = FileManager.default.urls(
+            for: .libraryDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw PagoTestError.libraryUnavailable
+        }
+
+        let sounds = library.appendingPathComponent("Sounds", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: sounds,
+            withIntermediateDirectories: true
+        )
+        return sounds
+    }
+
+    private func finish(_ result: Result<String, Error>) {
+        guard !completed else { return }
+        completed = true
+        let callback = completion
+        completion = nil
+        callback?(result)
+    }
+}
+
+enum PagoTestError: LocalizedError {
+    case libraryUnavailable
+    case invalidAudioBuffer
+
+    var errorDescription: String? {
+        switch self {
+        case .libraryUnavailable:
+            return "No se encontró Library."
+        case .invalidAudioBuffer:
+            return "El sintetizador devolvió un formato de audio inesperado."
         }
     }
 }
