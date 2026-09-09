@@ -1,0 +1,48 @@
+name: SoffastPago
+options:
+  bundleIdPrefix: com.soffast
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""
+targets:
+  SoffastPago:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    info:
+      path: App/Info.plist
+    entitlements:
+      path: App/SoffastPago.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soffast.pago
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: PagoNotificationService
+        embed: true
+  PagoNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotificationService
+    info:
+      path: NotificationService/Info.plist
+    entitlements:
+      path: NotificationService/PagoNotificationService.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soffast.pago.NotificationService
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
+schemes:
+  SoffastPago:
+    build:
+      targets:
+        SoffastPago: all
+        PagoNotificationService: all
+    run:
+      config: Debug
