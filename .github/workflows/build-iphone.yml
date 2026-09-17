@@ -1,7 +1,10 @@
-name: Compilar Prueba Unica iPhone
+name: Compilar SofPago iPhone Audio Multimedia
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
@@ -34,11 +37,11 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/SoffastPagoPrueba.app Payload/
-          zip -qry Soffast_Pago_iPhone_PRUEBA_UNICA_UNSIGNED.ipa Payload
+          zip -qry SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V1_UNSIGNED.ipa Payload
 
       - name: Publicar IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Soffast-Pago-iPhone-PRUEBA-UNICA
-          path: Soffast_Pago_iPhone_PRUEBA_UNICA_UNSIGNED.ipa
+          name: SofPago-iPhone-AUDIO-MULTIMEDIA-BLOQUEADO-V1
+          path: SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V1_UNSIGNED.ipa
           retention-days: 7
