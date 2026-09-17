@@ -1,6 +1,6 @@
 import SwiftUI
 import AVFoundation
-import UserNotifications
+import AudioToolbox
 
 struct ContentView: View {
     @StateObject private var manager = PagoTestManager()
@@ -12,10 +12,10 @@ struct ContentView: View {
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 72))
 
-            Text("Soffast Pago")
+            Text("SofPago")
                 .font(.largeTitle.bold())
 
-            Text("Prueba única iPhone")
+            Text("Audio multimedia iPhone V1")
                 .font(.headline)
 
             Text(manager.status)
@@ -27,12 +27,17 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            Button("Probar con iPhone bloqueado") {
-                manager.prepareLockedTest()
+            Button("Probar bloqueado con multimedia") {
+                manager.prepareLockedMultimediaTest()
             }
             .buttonStyle(.borderedProminent)
 
-            Text("Al pulsar la segunda opción tendrás 12 segundos para bloquear el iPhone.")
+            Button("Detener prueba") {
+                manager.stopTest()
+            }
+            .buttonStyle(.bordered)
+
+            Text("La segunda opción activa el motor de audio multimedia. Tendrás 12 segundos para bloquear el iPhone. La voz debe obedecer al volumen multimedia, no a Timbre y alertas.")
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -43,173 +48,147 @@ struct ContentView: View {
     }
 }
 
-final class PagoTestManager: ObservableObject {
-    @Published var status = "Primero prueba la voz. Luego prueba con el iPhone bloqueado."
+final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    @Published var status = "Prueba primero la voz. Luego prueba con el iPhone bloqueado."
 
-    private let liveSynth = AVSpeechSynthesizer()
-    private var fileGenerator: SpeechFileGenerator?
+    private let synthesizer = AVSpeechSynthesizer()
+    private let keepAliveEngine = AVAudioEngine()
+    private var silentSourceNode: AVAudioSourceNode?
+    private var scheduledWorkItem: DispatchWorkItem?
+    private var stopEngineAfterSpeech = false
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+        synthesizer.usesApplicationAudioSession = true
+    }
 
     func speakNow() {
+        cancelScheduledSpeech()
+
+        do {
+            try activateMultimediaSession()
+            speakPaymentPhrase()
+            status = "Reproduciendo por audio multimedia: Yape, Walter, diez soles."
+        } catch {
+            status = "No se pudo activar el audio multimedia: \(error.localizedDescription)"
+        }
+    }
+
+    func prepareLockedMultimediaTest() {
+        cancelScheduledSpeech()
+        synthesizer.stopSpeaking(at: .immediate)
+
+        do {
+            try activateMultimediaSession()
+            try startBackgroundAudioEngine()
+
+            stopEngineAfterSpeech = true
+            status = "LISTO: motor multimedia activo. Bloquea el iPhone ahora. La voz sonará en 12 segundos."
+
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.scheduledWorkItem = nil
+                self.speakPaymentPhrase()
+                self.status = "Reproduciendo con iPhone bloqueado por el canal multimedia."
+            }
+
+            scheduledWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+        } catch {
+            stopBackgroundAudioEngine()
+            status = "No se pudo iniciar el audio en segundo plano: \(error.localizedDescription)"
+        }
+    }
+
+    func stopTest() {
+        cancelScheduledSpeech()
+        synthesizer.stopSpeaking(at: .immediate)
+        stopEngineAfterSpeech = false
+        stopBackgroundAudioEngine()
+        deactivateSession()
+        status = "Prueba detenida."
+    }
+
+    private func activateMultimediaSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try session.setActive(true)
+    }
+
+    private func speakPaymentPhrase() {
         let utterance = AVSpeechUtterance(string: "Yape, Walter, diez soles.")
         utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
             ?? AVSpeechSynthesisVoice(language: "es-ES")
         utterance.rate = 0.48
-        liveSynth.speak(utterance)
-        status = "Reproduciendo: Yape, Walter, diez soles."
+        utterance.volume = 1.0
+        synthesizer.speak(utterance)
     }
 
-    func prepareLockedTest() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
-            DispatchQueue.main.async {
-                guard let self else { return }
+    private func startBackgroundAudioEngine() throws {
+        guard !keepAliveEngine.isRunning else { return }
 
-                if let error {
-                    self.status = "Error de permisos: \(error.localizedDescription)"
-                    return
-                }
-
-                guard granted else {
-                    self.status = "Debes permitir notificaciones para hacer la prueba."
-                    return
-                }
-
-                self.status = "Generando audio..."
-                self.generateAndSchedule()
-            }
-        }
-    }
-
-    private func generateAndSchedule() {
-        let generator = SpeechFileGenerator()
-        self.fileGenerator = generator
-
-        generator.generate(text: "Yape, Walter, diez soles.") { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-
-                switch result {
-                case .failure(let error):
-                    self.status = "No se pudo generar el audio: \(error.localizedDescription)"
-                    self.fileGenerator = nil
-
-                case .success(let filename):
-                    let content = UNMutableNotificationContent()
-                    content.title = "Pago"
-                    content.body = "Yape, Walter, diez soles."
-                    content.sound = UNNotificationSound(named: UNNotificationSoundName(filename))
-
-                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 12, repeats: false)
-                    let request = UNNotificationRequest(
-                        identifier: "soffast-pago-prueba-bloqueado",
-                        content: content,
-                        trigger: trigger
-                    )
-
-                    UNUserNotificationCenter.current().add(request) { error in
-                        DispatchQueue.main.async {
-                            if let error {
-                                self.status = "No se pudo programar la prueba: \(error.localizedDescription)"
-                            } else {
-                                self.status = "LISTO: bloquea el iPhone ahora. Sonará en 12 segundos."
-                            }
-                            self.fileGenerator = nil
-                        }
+        if silentSourceNode == nil {
+            let source = AVAudioSourceNode { _, _, _, audioBufferList -> OSStatus in
+                let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+                for buffer in buffers {
+                    if let data = buffer.mData, buffer.mDataByteSize > 0 {
+                        memset(data, 0, Int(buffer.mDataByteSize))
                     }
                 }
+                return noErr
             }
+
+            silentSourceNode = source
+            keepAliveEngine.attach(source)
+            keepAliveEngine.connect(source, to: keepAliveEngine.mainMixerNode, format: nil)
+        }
+
+        keepAliveEngine.prepare()
+        try keepAliveEngine.start()
+    }
+
+    private func stopBackgroundAudioEngine() {
+        if keepAliveEngine.isRunning {
+            keepAliveEngine.stop()
+        }
+
+        if let source = silentSourceNode {
+            keepAliveEngine.disconnectNodeOutput(source)
+            keepAliveEngine.detach(source)
+            silentSourceNode = nil
         }
     }
-}
 
-final class SpeechFileGenerator: NSObject {
-    private let synthesizer = AVSpeechSynthesizer()
-    private var audioFile: AVAudioFile?
-    private var completed = false
-    private var completion: ((Result<String, Error>) -> Void)?
+    private func cancelScheduledSpeech() {
+        scheduledWorkItem?.cancel()
+        scheduledWorkItem = nil
+    }
 
-    func generate(text: String, completion: @escaping (Result<String, Error>) -> Void) {
-        self.completion = completion
-
+    private func deactivateSession() {
         do {
-            let soundsURL = try ensureSoundsDirectory()
-            let filename = "soffast_pago_prueba.caf"
-            let destination = soundsURL.appendingPathComponent(filename)
-
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-
-            let utterance = AVSpeechUtterance(string: text)
-            utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
-                ?? AVSpeechSynthesisVoice(language: "es-ES")
-            utterance.rate = 0.48
-
-            synthesizer.write(utterance) { [weak self] buffer in
-                guard let self else { return }
-
-                guard let pcm = buffer as? AVAudioPCMBuffer else {
-                    self.finish(.failure(PagoTestError.invalidAudioBuffer))
-                    return
-                }
-
-                if pcm.frameLength == 0 {
-                    self.audioFile = nil
-                    self.finish(.success(filename))
-                    return
-                }
-
-                do {
-                    if self.audioFile == nil {
-                        self.audioFile = try AVAudioFile(
-                            forWriting: destination,
-                            settings: pcm.format.settings
-                        )
-                    }
-                    try self.audioFile?.write(from: pcm)
-                } catch {
-                    self.finish(.failure(error))
-                }
-            }
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
-            finish(.failure(error))
+            // No bloqueamos la prueba por un fallo al desactivar la sesión.
         }
     }
 
-    private func ensureSoundsDirectory() throws -> URL {
-        guard let library = FileManager.default.urls(
-            for: .libraryDirectory,
-            in: .userDomainMask
-        ).first else {
-            throw PagoTestError.libraryUnavailable
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        guard stopEngineAfterSpeech else { return }
+        stopEngineAfterSpeech = false
+        stopBackgroundAudioEngine()
+        deactivateSession()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.status = "PRUEBA TERMINADA. Compara el volumen con Escuchar voz ahora."
         }
-
-        let sounds = library.appendingPathComponent("Sounds", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: sounds,
-            withIntermediateDirectories: true
-        )
-        return sounds
     }
 
-    private func finish(_ result: Result<String, Error>) {
-        guard !completed else { return }
-        completed = true
-        let callback = completion
-        completion = nil
-        callback?(result)
-    }
-}
-
-enum PagoTestError: LocalizedError {
-    case libraryUnavailable
-    case invalidAudioBuffer
-
-    var errorDescription: String? {
-        switch self {
-        case .libraryUnavailable:
-            return "No se encontró Library."
-        case .invalidAudioBuffer:
-            return "El sintetizador devolvió un formato de audio inesperado."
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        if stopEngineAfterSpeech {
+            stopEngineAfterSpeech = false
+            stopBackgroundAudioEngine()
+            deactivateSession()
         }
     }
 }
