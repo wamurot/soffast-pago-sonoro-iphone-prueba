@@ -1,6 +1,6 @@
 import SwiftUI
 import AVFoundation
-import AudioToolbox
+import UIKit
 
 struct ContentView: View {
     @StateObject private var manager = PagoTestManager()
@@ -15,7 +15,7 @@ struct ContentView: View {
             Text("SofPago")
                 .font(.largeTitle.bold())
 
-            Text("Audio multimedia iPhone V1")
+            Text("Audio multimedia iPhone V2")
                 .font(.headline)
 
             Text(manager.status)
@@ -37,7 +37,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
 
-            Text("La segunda opción activa el motor de audio multimedia. Tendrás 12 segundos para bloquear el iPhone. La voz debe obedecer al volumen multimedia, no a Timbre y alertas.")
+            Text("Pulsa la segunda opción y bloquea el iPhone. SofPago conservará tiempo de ejecución en segundo plano y reproducirá la voz por el canal multimedia después de 12 segundos.")
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -52,10 +52,9 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
     @Published var status = "Prueba primero la voz. Luego prueba con el iPhone bloqueado."
 
     private let synthesizer = AVSpeechSynthesizer()
-    private let keepAliveEngine = AVAudioEngine()
-    private var silentSourceNode: AVAudioSourceNode?
     private var scheduledWorkItem: DispatchWorkItem?
-    private var stopEngineAfterSpeech = false
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var lockedTestActive = false
 
     override init() {
         super.init()
@@ -64,7 +63,8 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
     }
 
     func speakNow() {
-        cancelScheduledSpeech()
+        stopPendingLockedTest()
+        synthesizer.stopSpeaking(at: .immediate)
 
         do {
             try activateMultimediaSession()
@@ -76,43 +76,48 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
     }
 
     func prepareLockedMultimediaTest() {
-        cancelScheduledSpeech()
+        stopPendingLockedTest()
         synthesizer.stopSpeaking(at: .immediate)
 
         do {
             try activateMultimediaSession()
-            try startBackgroundAudioEngine()
-
-            stopEngineAfterSpeech = true
-            status = "LISTO: motor multimedia activo. Bloquea el iPhone ahora. La voz sonará en 12 segundos."
-
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.scheduledWorkItem = nil
-                self.speakPaymentPhrase()
-                self.status = "Reproduciendo con iPhone bloqueado por el canal multimedia."
-            }
-
-            scheduledWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
         } catch {
-            stopBackgroundAudioEngine()
-            status = "No se pudo iniciar el audio en segundo plano: \(error.localizedDescription)"
+            status = "No se pudo activar el audio multimedia: \(error.localizedDescription)"
+            return
         }
+
+        lockedTestActive = true
+        beginBackgroundExecution()
+
+        guard backgroundTask != .invalid else {
+            lockedTestActive = false
+            status = "iOS no concedió tiempo de ejecución en segundo plano."
+            return
+        }
+
+        status = "LISTO: bloquea el iPhone ahora. La voz multimedia sonará en 12 segundos."
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.lockedTestActive else { return }
+            self.scheduledWorkItem = nil
+            self.speakPaymentPhrase()
+            self.status = "Reproduciendo con el iPhone bloqueado por volumen multimedia."
+        }
+
+        scheduledWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
     }
 
     func stopTest() {
-        cancelScheduledSpeech()
+        stopPendingLockedTest()
         synthesizer.stopSpeaking(at: .immediate)
-        stopEngineAfterSpeech = false
-        stopBackgroundAudioEngine()
         deactivateSession()
         status = "Prueba detenida."
     }
 
     private func activateMultimediaSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try session.setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers])
         try session.setActive(true)
     }
 
@@ -125,70 +130,63 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
         synthesizer.speak(utterance)
     }
 
-    private func startBackgroundAudioEngine() throws {
-        guard !keepAliveEngine.isRunning else { return }
+    private func beginBackgroundExecution() {
+        endBackgroundExecution()
 
-        if silentSourceNode == nil {
-            let source = AVAudioSourceNode { _, _, _, audioBufferList -> OSStatus in
-                let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-                for buffer in buffers {
-                    if let data = buffer.mData, buffer.mDataByteSize > 0 {
-                        memset(data, 0, Int(buffer.mDataByteSize))
-                    }
-                }
-                return noErr
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SofPagoLockedAudioTest") { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.scheduledWorkItem?.cancel()
+                self.scheduledWorkItem = nil
+                self.lockedTestActive = false
+                self.status = "iOS terminó el tiempo de segundo plano antes de reproducir la voz."
+                self.endBackgroundExecution()
             }
-
-            silentSourceNode = source
-            keepAliveEngine.attach(source)
-            keepAliveEngine.connect(source, to: keepAliveEngine.mainMixerNode, format: nil)
-        }
-
-        keepAliveEngine.prepare()
-        try keepAliveEngine.start()
-    }
-
-    private func stopBackgroundAudioEngine() {
-        if keepAliveEngine.isRunning {
-            keepAliveEngine.stop()
-        }
-
-        if let source = silentSourceNode {
-            keepAliveEngine.disconnectNodeOutput(source)
-            keepAliveEngine.detach(source)
-            silentSourceNode = nil
         }
     }
 
-    private func cancelScheduledSpeech() {
+    private func stopPendingLockedTest() {
         scheduledWorkItem?.cancel()
         scheduledWorkItem = nil
+        lockedTestActive = false
+        endBackgroundExecution()
+    }
+
+    private func endBackgroundExecution() {
+        guard backgroundTask != .invalid else { return }
+        let task = backgroundTask
+        backgroundTask = .invalid
+        UIApplication.shared.endBackgroundTask(task)
     }
 
     private func deactivateSession() {
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
-            // No bloqueamos la prueba por un fallo al desactivar la sesión.
+            // La desactivación no debe bloquear la prueba.
         }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard stopEngineAfterSpeech else { return }
-        stopEngineAfterSpeech = false
-        stopBackgroundAudioEngine()
-        deactivateSession()
-
         DispatchQueue.main.async { [weak self] in
-            self?.status = "PRUEBA TERMINADA. Compara el volumen con Escuchar voz ahora."
+            guard let self else { return }
+
+            if self.lockedTestActive {
+                self.lockedTestActive = false
+                self.endBackgroundExecution()
+                self.deactivateSession()
+                self.status = "PRUEBA TERMINADA. Debió sonar bloqueado usando el volumen multimedia."
+            }
         }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        if stopEngineAfterSpeech {
-            stopEngineAfterSpeech = false
-            stopBackgroundAudioEngine()
-            deactivateSession()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.lockedTestActive {
+                self.lockedTestActive = false
+                self.endBackgroundExecution()
+            }
         }
     }
 }
