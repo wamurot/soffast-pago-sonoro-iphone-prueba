@@ -16,6 +16,22 @@ targets:
       - App
     info:
       path: App/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: es
+        CFBundleDisplayName: SofPago
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "1.4"
+        CFBundleVersion: "5"
+        LSRequiresIPhoneOS: true
+        UIBackgroundModes:
+          - audio
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.soffast.pago.prueba
