@@ -24,8 +24,8 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: APPL
-        CFBundleShortVersionString: "1.4"
-        CFBundleVersion: "5"
+        CFBundleShortVersionString: "1.5"
+        CFBundleVersion: "6"
         LSRequiresIPhoneOS: true
         UIBackgroundModes:
           - audio
@@ -36,6 +36,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.soffast.pago.prueba
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: App/SofPagoPushProbe.entitlements
 
 schemes:
   SoffastPagoPrueba:
