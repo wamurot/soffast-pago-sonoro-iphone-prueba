@@ -37,11 +37,11 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/SoffastPagoPrueba.app Payload/
-          zip -qry SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V2_UNSIGNED.ipa Payload
+          zip -qry SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V3_UNSIGNED.ipa Payload
 
       - name: Publicar IPA
         uses: actions/upload-artifact@v4
         with:
-          name: SofPago-iPhone-AUDIO-MULTIMEDIA-BLOQUEADO-V2
-          path: SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V2_UNSIGNED.ipa
+          name: SofPago-iPhone-AUDIO-MULTIMEDIA-BLOQUEADO-V3
+          path: SofPago_iPhone_AUDIO_MULTIMEDIA_BLOQUEADO_V3_UNSIGNED.ipa
           retention-days: 7
