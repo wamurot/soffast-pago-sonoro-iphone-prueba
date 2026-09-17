@@ -3,52 +3,84 @@ import AVFoundation
 
 struct ContentView: View {
     @StateObject private var manager = PagoTestManager()
+    @StateObject private var push = PushProbeState.shared
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 18) {
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.system(size: 64))
+                    .padding(.top, 18)
 
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.system(size: 72))
+                Text("SofPago")
+                    .font(.largeTitle.bold())
 
-            Text("SofPago")
-                .font(.largeTitle.bold())
+                Text("iPhone V5 — prueba APNs")
+                    .font(.headline)
 
-            Text("Audio multimedia iPhone V4")
-                .font(.headline)
+                Group {
+                    Text("PASO 1: comprobar si esta instalación permite Push de Apple")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
 
-            Text(manager.backgroundModeStatus)
-                .font(.subheadline.bold())
-                .multilineTextAlignment(.center)
+                    Text(push.status)
+                        .font(.subheadline.bold())
+                        .multilineTextAlignment(.center)
+
+                    Button("Comprobar APNs ahora") {
+                        push.start()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    if !push.token.isEmpty {
+                        Text("DEVICE TOKEN")
+                            .font(.caption.bold())
+
+                        Text(push.token)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    Text("Si aparece APNs OK y un device token, podemos pasar a la prueba real con la app forzada a cerrar. Si aparece un error de aps-environment, la firma usada por Sideloadly no tiene Push habilitado.")
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                }
                 .padding(.horizontal)
 
-            Text(manager.status)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+                Divider().padding(.vertical, 4)
 
-            Button("Escuchar voz ahora") {
-                manager.speakNow()
+                Text(manager.backgroundModeStatus)
+                    .font(.subheadline.bold())
+                    .multilineTextAlignment(.center)
+
+                Text(manager.status)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                Button("Escuchar voz ahora") {
+                    manager.speakNow()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Probar bloqueado con multimedia") {
+                    manager.prepareLockedMultimediaTest()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Detener prueba") {
+                    manager.stopTest()
+                }
+                .buttonStyle(.bordered)
+
+                Text("La prueba de audio sigue en 5 segundos. V5 añade únicamente la comprobación real de APNs antes de construir el envío remoto con la app cerrada.")
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
             }
-            .buttonStyle(.borderedProminent)
-
-            Button("Probar bloqueado con multimedia") {
-                manager.prepareLockedMultimediaTest()
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button("Detener prueba") {
-                manager.stopTest()
-            }
-            .buttonStyle(.bordered)
-
-            Text("V4 corrige el modo de audio en segundo plano dentro del IPA. La segunda prueba usa solo 5 segundos antes de decir: Yape, Walter, diez soles.")
-                .font(.footnote)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            Spacer()
         }
-        .padding()
+        .padding(.horizontal)
     }
 }
 
@@ -102,7 +134,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
             return
         }
 
-        status = "Generando prueba V4 de 5 segundos..."
+        status = "Generando prueba de 5 segundos..."
 
         let generator = SpeechWithSilenceFileGenerator()
         fileGenerator = generator
@@ -117,7 +149,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
 
                 switch result {
                 case .failure(let error):
-                    self.status = "No se pudo preparar el audio V4: \(error.localizedDescription)"
+                    self.status = "No se pudo preparar el audio: \(error.localizedDescription)"
                     self.deactivateSession()
 
                 case .success(let url):
@@ -137,7 +169,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
 
                         self.status = "REPRODUCCIÓN MULTIMEDIA ACTIVA. Bloquea el iPhone AHORA. En 5 segundos debe hablar."
                     } catch {
-                        self.status = "No se pudo iniciar el reproductor V4: \(error.localizedDescription)"
+                        self.status = "No se pudo iniciar el reproductor: \(error.localizedDescription)"
                         self.deactivateSession()
                     }
                 }
@@ -187,8 +219,8 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
             self.lockedPlayer = nil
             self.deactivateSession()
             self.status = flag
-                ? "PRUEBA V4 TERMINADA."
-                : "La reproducción V4 terminó de forma inesperada."
+                ? "PRUEBA TERMINADA."
+                : "La reproducción terminó de forma inesperada."
         }
     }
 }
@@ -212,7 +244,7 @@ final class SpeechWithSilenceFileGenerator: NSObject {
 
         do {
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("sofpago_multimedia_bloqueado_v4.caf")
+                .appendingPathComponent("sofpago_multimedia_v5.caf")
             destination = url
 
             if FileManager.default.fileExists(atPath: url.path) {
