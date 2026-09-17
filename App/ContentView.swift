@@ -5,7 +5,7 @@ struct ContentView: View {
     @StateObject private var manager = PagoTestManager()
 
     var body: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 20) {
             Spacer()
 
             Image(systemName: "speaker.wave.3.fill")
@@ -14,8 +14,13 @@ struct ContentView: View {
             Text("SofPago")
                 .font(.largeTitle.bold())
 
-            Text("Audio multimedia iPhone V3")
+            Text("Audio multimedia iPhone V4")
                 .font(.headline)
+
+            Text(manager.backgroundModeStatus)
+                .font(.subheadline.bold())
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
 
             Text(manager.status)
                 .multilineTextAlignment(.center)
@@ -36,7 +41,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
 
-            Text("En V3 la segunda prueba genera un único archivo de audio con 12 segundos iniciales de silencio y luego la frase. El archivo comienza a reproducirse antes de bloquear el iPhone, de modo que iOS mantiene una reproducción multimedia real mientras la pantalla está apagada.")
+            Text("V4 corrige el modo de audio en segundo plano dentro del IPA. La segunda prueba usa solo 5 segundos antes de decir: Yape, Walter, diez soles.")
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -49,6 +54,7 @@ struct ContentView: View {
 
 final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     @Published var status = "Prueba primero la voz. Luego prueba con el iPhone bloqueado."
+    @Published var backgroundModeStatus = "Comprobando audio en segundo plano..."
 
     private let synthesizer = AVSpeechSynthesizer()
     private var fileGenerator: SpeechWithSilenceFileGenerator?
@@ -58,6 +64,11 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
         super.init()
         synthesizer.delegate = self
         synthesizer.usesApplicationAudioSession = true
+
+        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        backgroundModeStatus = modes.contains("audio")
+            ? "BACKGROUND AUDIO EN IPA: OK"
+            : "BACKGROUND AUDIO EN IPA: FALTA"
     }
 
     func speakNow() {
@@ -78,6 +89,12 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
         stopLockedPlayback()
         synthesizer.stopSpeaking(at: .immediate)
 
+        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        guard modes.contains("audio") else {
+            status = "ERROR: este IPA no contiene UIBackgroundModes=audio."
+            return
+        }
+
         do {
             try activateMultimediaSession()
         } catch {
@@ -85,14 +102,14 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
             return
         }
 
-        status = "Generando la prueba V3... espera un momento."
+        status = "Generando prueba V4 de 5 segundos..."
 
         let generator = SpeechWithSilenceFileGenerator()
         fileGenerator = generator
 
         generator.generate(
             text: "Yape, Walter, diez soles.",
-            silenceSeconds: 12.0
+            silenceSeconds: 5.0
         ) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -100,7 +117,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
 
                 switch result {
                 case .failure(let error):
-                    self.status = "No se pudo preparar el audio V3: \(error.localizedDescription)"
+                    self.status = "No se pudo preparar el audio V4: \(error.localizedDescription)"
                     self.deactivateSession()
 
                 case .success(let url):
@@ -118,9 +135,9 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
                             return
                         }
 
-                        self.status = "SONANDO EN MULTIMEDIA. Bloquea el iPhone AHORA. En 12 segundos debe decir: Yape, Walter, diez soles."
+                        self.status = "REPRODUCCIÓN MULTIMEDIA ACTIVA. Bloquea el iPhone AHORA. En 5 segundos debe hablar."
                     } catch {
-                        self.status = "No se pudo iniciar el reproductor V3: \(error.localizedDescription)"
+                        self.status = "No se pudo iniciar el reproductor V4: \(error.localizedDescription)"
                         self.deactivateSession()
                     }
                 }
@@ -137,7 +154,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
 
     private func activateMultimediaSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+        try session.setCategory(.playback, mode: .default, options: [])
         try session.setActive(true)
     }
 
@@ -160,7 +177,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
-            // No bloqueamos la prueba por un fallo al cerrar la sesión.
+            // La desactivación no debe bloquear la prueba.
         }
     }
 
@@ -170,8 +187,8 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
             self.lockedPlayer = nil
             self.deactivateSession()
             self.status = flag
-                ? "PRUEBA V3 TERMINADA. La frase debió sonar con el iPhone bloqueado por volumen multimedia."
-                : "La reproducción V3 terminó de forma inesperada."
+                ? "PRUEBA V4 TERMINADA."
+                : "La reproducción V4 terminó de forma inesperada."
         }
     }
 }
@@ -183,7 +200,7 @@ final class SpeechWithSilenceFileGenerator: NSObject {
     private var destination: URL?
     private var silenceWritten = false
     private var finished = false
-    private var silenceSeconds: Double = 12.0
+    private var silenceSeconds: Double = 5.0
 
     func generate(
         text: String,
@@ -195,7 +212,7 @@ final class SpeechWithSilenceFileGenerator: NSObject {
 
         do {
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("sofpago_multimedia_bloqueado_v3.caf")
+                .appendingPathComponent("sofpago_multimedia_bloqueado_v4.caf")
             destination = url
 
             if FileManager.default.fileExists(atPath: url.path) {
