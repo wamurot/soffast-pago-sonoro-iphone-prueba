@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import UIKit
 
 struct ContentView: View {
     @StateObject private var manager = PagoTestManager()
@@ -15,7 +14,7 @@ struct ContentView: View {
             Text("SofPago")
                 .font(.largeTitle.bold())
 
-            Text("Audio multimedia iPhone V2")
+            Text("Audio multimedia iPhone V3")
                 .font(.headline)
 
             Text(manager.status)
@@ -37,7 +36,7 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
 
-            Text("Pulsa la segunda opción y bloquea el iPhone. SofPago conservará tiempo de ejecución en segundo plano y reproducirá la voz por el canal multimedia después de 12 segundos.")
+            Text("En V3 la segunda prueba genera un único archivo de audio con 12 segundos iniciales de silencio y luego la frase. El archivo comienza a reproducirse antes de bloquear el iPhone, de modo que iOS mantiene una reproducción multimedia real mientras la pantalla está apagada.")
                 .font(.footnote)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -48,13 +47,12 @@ struct ContentView: View {
     }
 }
 
-final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     @Published var status = "Prueba primero la voz. Luego prueba con el iPhone bloqueado."
 
     private let synthesizer = AVSpeechSynthesizer()
-    private var scheduledWorkItem: DispatchWorkItem?
-    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-    private var lockedTestActive = false
+    private var fileGenerator: SpeechWithSilenceFileGenerator?
+    private var lockedPlayer: AVAudioPlayer?
 
     override init() {
         super.init()
@@ -63,12 +61,13 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
     }
 
     func speakNow() {
-        stopPendingLockedTest()
+        stopLockedPlayback()
         synthesizer.stopSpeaking(at: .immediate)
 
         do {
             try activateMultimediaSession()
-            speakPaymentPhrase()
+            let utterance = paymentUtterance()
+            synthesizer.speak(utterance)
             status = "Reproduciendo por audio multimedia: Yape, Walter, diez soles."
         } catch {
             status = "No se pudo activar el audio multimedia: \(error.localizedDescription)"
@@ -76,7 +75,7 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
     }
 
     func prepareLockedMultimediaTest() {
-        stopPendingLockedTest()
+        stopLockedPlayback()
         synthesizer.stopSpeaking(at: .immediate)
 
         do {
@@ -86,107 +85,232 @@ final class PagoTestManager: NSObject, ObservableObject, AVSpeechSynthesizerDele
             return
         }
 
-        lockedTestActive = true
-        beginBackgroundExecution()
+        status = "Generando la prueba V3... espera un momento."
 
-        guard backgroundTask != .invalid else {
-            lockedTestActive = false
-            status = "iOS no concedió tiempo de ejecución en segundo plano."
-            return
+        let generator = SpeechWithSilenceFileGenerator()
+        fileGenerator = generator
+
+        generator.generate(
+            text: "Yape, Walter, diez soles.",
+            silenceSeconds: 12.0
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.fileGenerator = nil
+
+                switch result {
+                case .failure(let error):
+                    self.status = "No se pudo preparar el audio V3: \(error.localizedDescription)"
+                    self.deactivateSession()
+
+                case .success(let url):
+                    do {
+                        let player = try AVAudioPlayer(contentsOf: url)
+                        player.delegate = self
+                        player.volume = 1.0
+                        player.prepareToPlay()
+                        self.lockedPlayer = player
+
+                        guard player.play() else {
+                            self.status = "iOS no inició la reproducción multimedia."
+                            self.lockedPlayer = nil
+                            self.deactivateSession()
+                            return
+                        }
+
+                        self.status = "SONANDO EN MULTIMEDIA. Bloquea el iPhone AHORA. En 12 segundos debe decir: Yape, Walter, diez soles."
+                    } catch {
+                        self.status = "No se pudo iniciar el reproductor V3: \(error.localizedDescription)"
+                        self.deactivateSession()
+                    }
+                }
+            }
         }
-
-        status = "LISTO: bloquea el iPhone ahora. La voz multimedia sonará en 12 segundos."
-
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.lockedTestActive else { return }
-            self.scheduledWorkItem = nil
-            self.speakPaymentPhrase()
-            self.status = "Reproduciendo con el iPhone bloqueado por volumen multimedia."
-        }
-
-        scheduledWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
     }
 
     func stopTest() {
-        stopPendingLockedTest()
         synthesizer.stopSpeaking(at: .immediate)
+        stopLockedPlayback()
         deactivateSession()
         status = "Prueba detenida."
     }
 
     private func activateMultimediaSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers])
+        try session.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
         try session.setActive(true)
     }
 
-    private func speakPaymentPhrase() {
+    private func paymentUtterance() -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: "Yape, Walter, diez soles.")
         utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
             ?? AVSpeechSynthesisVoice(language: "es-ES")
         utterance.rate = 0.48
         utterance.volume = 1.0
-        synthesizer.speak(utterance)
+        return utterance
     }
 
-    private func beginBackgroundExecution() {
-        endBackgroundExecution()
-
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SofPagoLockedAudioTest") { [weak self] in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.scheduledWorkItem?.cancel()
-                self.scheduledWorkItem = nil
-                self.lockedTestActive = false
-                self.status = "iOS terminó el tiempo de segundo plano antes de reproducir la voz."
-                self.endBackgroundExecution()
-            }
-        }
-    }
-
-    private func stopPendingLockedTest() {
-        scheduledWorkItem?.cancel()
-        scheduledWorkItem = nil
-        lockedTestActive = false
-        endBackgroundExecution()
-    }
-
-    private func endBackgroundExecution() {
-        guard backgroundTask != .invalid else { return }
-        let task = backgroundTask
-        backgroundTask = .invalid
-        UIApplication.shared.endBackgroundTask(task)
+    private func stopLockedPlayback() {
+        lockedPlayer?.stop()
+        lockedPlayer = nil
+        fileGenerator = nil
     }
 
     private func deactivateSession() {
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
-            // La desactivación no debe bloquear la prueba.
+            // No bloqueamos la prueba por un fallo al cerrar la sesión.
         }
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.lockedPlayer = nil
+            self.deactivateSession()
+            self.status = flag
+                ? "PRUEBA V3 TERMINADA. La frase debió sonar con el iPhone bloqueado por volumen multimedia."
+                : "La reproducción V3 terminó de forma inesperada."
+        }
+    }
+}
 
-            if self.lockedTestActive {
-                self.lockedTestActive = false
-                self.endBackgroundExecution()
-                self.deactivateSession()
-                self.status = "PRUEBA TERMINADA. Debió sonar bloqueado usando el volumen multimedia."
+final class SpeechWithSilenceFileGenerator: NSObject {
+    private let synthesizer = AVSpeechSynthesizer()
+    private var audioFile: AVAudioFile?
+    private var completion: ((Result<URL, Error>) -> Void)?
+    private var destination: URL?
+    private var silenceWritten = false
+    private var finished = false
+    private var silenceSeconds: Double = 12.0
+
+    func generate(
+        text: String,
+        silenceSeconds: Double,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
+        self.completion = completion
+        self.silenceSeconds = silenceSeconds
+
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sofpago_multimedia_bloqueado_v3.caf")
+            destination = url
+
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
             }
+
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.voice = AVSpeechSynthesisVoice(language: "es-PE")
+                ?? AVSpeechSynthesisVoice(language: "es-ES")
+            utterance.rate = 0.48
+            utterance.volume = 1.0
+
+            synthesizer.write(utterance) { [weak self] buffer in
+                guard let self, !self.finished else { return }
+
+                guard let pcm = buffer as? AVAudioPCMBuffer else {
+                    self.finish(.failure(PagoTestError.invalidAudioBuffer))
+                    return
+                }
+
+                if pcm.frameLength == 0 {
+                    self.audioFile = nil
+                    guard let destination = self.destination else {
+                        self.finish(.failure(PagoTestError.outputUnavailable))
+                        return
+                    }
+                    self.finish(.success(destination))
+                    return
+                }
+
+                do {
+                    if self.audioFile == nil {
+                        guard let destination = self.destination else {
+                            throw PagoTestError.outputUnavailable
+                        }
+
+                        self.audioFile = try AVAudioFile(
+                            forWriting: destination,
+                            settings: pcm.format.settings
+                        )
+                    }
+
+                    if !self.silenceWritten {
+                        guard let file = self.audioFile else {
+                            throw PagoTestError.outputUnavailable
+                        }
+                        try self.writeSilence(
+                            seconds: self.silenceSeconds,
+                            format: pcm.format,
+                            to: file
+                        )
+                        self.silenceWritten = true
+                    }
+
+                    try self.audioFile?.write(from: pcm)
+                } catch {
+                    self.finish(.failure(error))
+                }
+            }
+        } catch {
+            finish(.failure(error))
         }
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if self.lockedTestActive {
-                self.lockedTestActive = false
-                self.endBackgroundExecution()
+    private func writeSilence(
+        seconds: Double,
+        format: AVAudioFormat,
+        to file: AVAudioFile
+    ) throws {
+        var remaining = AVAudioFrameCount(format.sampleRate * seconds)
+        let chunkCapacity: AVAudioFrameCount = 4096
+
+        while remaining > 0 {
+            let frames = min(remaining, chunkCapacity)
+
+            guard let silence = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: frames
+            ) else {
+                throw PagoTestError.invalidAudioBuffer
             }
+
+            silence.frameLength = frames
+
+            let buffers = UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList)
+            for buffer in buffers {
+                if let data = buffer.mData, buffer.mDataByteSize > 0 {
+                    memset(data, 0, Int(buffer.mDataByteSize))
+                }
+            }
+
+            try file.write(from: silence)
+            remaining -= frames
+        }
+    }
+
+    private func finish(_ result: Result<URL, Error>) {
+        guard !finished else { return }
+        finished = true
+        let callback = completion
+        completion = nil
+        callback?(result)
+    }
+}
+
+enum PagoTestError: LocalizedError {
+    case invalidAudioBuffer
+    case outputUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAudioBuffer:
+            return "El sintetizador devolvió un formato de audio inesperado."
+        case .outputUnavailable:
+            return "No se pudo preparar el archivo de audio."
         }
     }
 }
